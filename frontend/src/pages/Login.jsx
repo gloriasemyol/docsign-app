@@ -21,13 +21,21 @@ export default function Login() {
     <div className="min-h-screen flex items-center justify-center bg-gray-100">
       <form onSubmit={handleSubmit} className="bg-white p-8 rounded-xl shadow w-96">
         <h2 className="text-xl font-bold mb-6">Sign In</h2>
-        <input type="email" placeholder="Email"
+        <input 
+          type="email" 
+          placeholder="Email"
           className="w-full border rounded-lg p-2 mb-4"
-          value={form.email} onChange={e => setForm({...form, email: e.target.value})} />
-        <input type="password" placeholder="Password"
+          value={form.email} 
+          onChange={e => setForm({...form, email: e.target.value})} 
+        />
+        <input 
+          type="password" 
+          placeholder="Password"
           className="w-full border rounded-lg p-2 mb-6"
-          value={form.password} onChange={e => setForm({...form, password: e.target.value})} />
-        <button className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
+          value={form.password} 
+          onChange={e => setForm({...form, password: e.target.value})} 
+        />
+        <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg hover:bg-blue-700">
           Login
         </button>
         <p className="text-center mt-4 text-sm">
