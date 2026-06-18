@@ -10,14 +10,14 @@ export default function SignPage() {
 
   useEffect(() => {
     // Load signature info by token
-    axios.get(`http://localhost:5000/api/signatures/token/${token}`)
+    axios.get(`${process.env.REACT_APP_API_URL}/api/signatures/token/${token}`)
       .then(r => setSig(r.data))
       .catch(() => setSig(null));
   }, [token]);
 
   const handleAction = async (action) => {
     try {
-      await axios.patch(`http://localhost:5000/api/signatures/${sig._id}/status`,
+      await axios.patch(`${process.env.REACT_APP_API_URL}/api/signatures/${sig._id}/status`,
         { status: action, reason });
       setDone(true);
     } catch {

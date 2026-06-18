@@ -24,7 +24,7 @@ export default function PDFEditor({ docId, filePath }) {
     const token = localStorage.getItem('token');
     try {
       for (const sig of signatures) {
-        await axios.post('http://localhost:5000/api/signatures',
+        await axios.post(`${process.env.REACT_APP_API_URL}/api/signatures`,
           { documentId: docId, x: sig.x, y: sig.y, page: sig.page },
           { headers: { Authorization: `Bearer ${token}` } }
         );
@@ -44,7 +44,7 @@ export default function PDFEditor({ docId, filePath }) {
         ref={pdfRef} onClick={handlePDFClick}>
 
         {/* Show the PDF */}
-        <Document file={`http://localhost:5000/${filePath}`}>
+        <Document file={`${process.env.REACT_APP_API_URL}/${filePath}`}>
           <Page pageNumber={1} width={700} />
         </Document>
 
