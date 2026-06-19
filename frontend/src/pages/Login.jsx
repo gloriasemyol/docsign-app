@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { login } from '../api';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom'; // <-- Added Link here
 
 export default function Login() {
   const [form, setForm] = useState({ email: '', password: '' });
@@ -13,7 +13,7 @@ export default function Login() {
       localStorage.setItem('token', res.data.token);
       navigate('/dashboard');
     } catch (err) {
-      alert('Login failed: ' + err.response?.data?.message);
+      alert('Login failed: ' + (err.response?.data?.message || err.message));
     }
   };
 
@@ -39,7 +39,8 @@ export default function Login() {
           Login
         </button>
         <p className="text-center mt-4 text-sm">
-          No account? <a href="/register" className="text-blue-600">Register</a>
+          {/* Changed <a> to <Link to="..."> below */}
+          No account? <Link to="/register" className="text-blue-600">Register</Link>
         </p>
       </form>
     </div>
