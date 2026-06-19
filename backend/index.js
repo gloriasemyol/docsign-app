@@ -2,35 +2,46 @@ const express = require('express');   // import express framework
 const mongoose = require('mongoose'); // import database connector
 const cors = require('cors');         // allow frontend to talk to backend
 const dotenv = require('dotenv');     // read our secret .env file
+const path = require('path');         // <-- Added built-in path module for static folders
 
 dotenv.config(); // load .env variables
 
 const app = express(); // create our server
 
+// Middleware configurations
 app.use(cors());               // allow cross-origin requests
-app.use(express.json());
+app.use(express.json());       // allow server to read JSON data
+
+// Expose uploaded files as static assets safely using absolute path
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'))); 
+
+// API Routes setup
 const authRoutes = require('./routes/authRoutes');
 app.use('/api/auth', authRoutes);
+
 const docRoutes = require('./routes/docRoutes');
 app.use('/api/docs', docRoutes);
+
 const sigRoutes = require('./routes/signatureRoutes');
-app.use('/api/signatures', sigRoutes);       // allow server to read JSON data
-app.use('/uploads', express.static('uploads')); // serve uploaded files
+app.use('/api/signatures', sigRoutes);       
 
 const auditRoutes = require('./routes/auditRoutes');
-app.use('/api/audit', auditRoutes)
+app.use('/api/audit', auditRoutes);
 
-// Connect to MongoDB database
-mongoose.connect(process.env.MONGO_URI)
+// Connect to MongoDB database with timeout configuration limits
+mongoose.connect(process.env.MONGO_URI, {
+    serverSelectionTimeoutMS: 5000 // Prevents blocking execution infinitely if connection drops
+  })
   .then(() => console.log('Database connected!'))
   .catch(err => console.log('DB Error:', err));
 
-// Test route - visit localhost:5000 to see this
+// Test root route - visit to see if backend is responsive
 app.get('/', (req, res) => {
   res.json({ message: 'DocSign API is running!' });
 });
 
-// Start server on port 5000
-app.listen(5000, () => {
-  console.log('Server running on http://localhost:5000');
+// Dynamic Port Allocation for Production Servers (Render uses process.env.PORT)
+const PORT = process.env.PORT || 5000;
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });
