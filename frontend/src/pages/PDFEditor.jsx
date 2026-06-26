@@ -1,10 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { Document, Page, pdfjs } from 'react-pdf';
 import axios from 'axios';
-import 'react-pdf/dist/Page/AnnotationLayer.css';
-
-pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjs.version}/pdf.worker.min.js`;
 
 export default function PDFEditor() {
   const { docId } = useParams();
@@ -20,6 +16,7 @@ export default function PDFEditor() {
       const cleanApiUrl = process.env.REACT_APP_API_URL.replace(/\/$/, '');
       
       try {
+        // 1. Get document details
         const res = await axios.get(`${cleanApiUrl}/api/docs`, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -27,24 +24,24 @@ export default function PDFEditor() {
         const currentDoc = res.data.find(d => d._id === docId);
         
         if (currentDoc && currentDoc.filePath) {
-          // Normalize separators and clean double subfolder structures
           let cleanPath = currentDoc.filePath.replace(/\\/g, '/');
           if (cleanPath.startsWith('uploads/')) {
             cleanPath = cleanPath.replace('uploads/', '');
           }
 
           const fileDownloadUrl = `${cleanApiUrl}/uploads/${cleanPath}`;
-          console.log("Requesting raw file path asset from endpoint:", fileDownloadUrl);
           
+          // 2. Safely download file as an isolated raw binary data stream
           const blobRes = await axios.get(fileDownloadUrl, {
             responseType: 'blob'
           });
           
-          const localUrl = URL.createObjectURL(blobRes.data);
+          // 3. Create a stable native browser URL pointing directly to the loaded data memory
+          const localUrl = URL.createObjectURL(new Blob([blobRes.data], { type: 'application/pdf' }));
           setPdfBlobUrl(localUrl);
         }
       } catch (err) {
-        console.error("Error downloading secure document content layers:", err);
+        console.error("Error bypassing content layer systems:", err);
       } finally {
         setLoading(false);
       }
@@ -100,45 +97,57 @@ export default function PDFEditor() {
     }
   };
 
-  if (loading) return <div className="p-8">Loading document editor workspace...</div>;
+  if (loading) return <div className="p-8 text-gray-500 font-medium">Assembling workspace canvas...</div>;
 
   return (
     <div className="p-8 flex flex-col md:flex-row gap-8">
+      {/* Left Column: The Native Workspace */}
       <div className="flex-1">
-        <h2 className="text-xl font-bold mb-2">Place Signature Fields</h2>
-        <p className="text-gray-500 mb-4">Click anywhere on the PDF pages below to place a signature field block.</p>
+        <h2 className="text-xl font-bold mb-2 text-gray-800">Place Signature Fields</h2>
+        <p className="text-gray-500 mb-4 text-sm">Click anywhere on the document layer below to pin a digital signature box element.</p>
 
         {pdfBlobUrl ? (
-          <div className="relative inline-block border-2 border-gray-200 rounded cursor-crosshair"
-            ref={pdfRef} onClick={handlePDFClick}>
+          <div 
+            className="relative inline-block border border-gray-300 rounded shadow-md overflow-hidden bg-gray-100 cursor-crosshair"
+            ref={pdfRef} 
+            onClick={handlePDFClick}
+            style={{ width: '740px', height: '950px' }}
+          >
+            {/* NEW MECHANISM: Embed uses native browser binaries instead of breaking react-pdf rendering chains */}
+            <embed
+              src={`${pdfBlobUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+              type="application/pdf"
+              width="100%"
+              height="100%"
+              className="pointer-events-none"
+            />
 
-            <Document 
-              file={pdfBlobUrl}
-              onLoadError={(err) => console.error("PDF Component Load Engine Mismatch:", err)}
-              loading={<div className="p-4 text-blue-600 font-medium">Assembling authenticated data stream layout...</div>}
-            >
-              <Page pageNumber={1} width={700} renderTextLayer={false} renderAnnotationLayer={false} />
-            </Document>
-
+            {/* Signature drop target flags */}
             {signatures.map((sig, i) => (
-              <div key={i} style={{ position: 'absolute', left: sig.x, top: sig.y, transform: 'translate(-50%, -50%)' }}
-                className="border-2 border-dashed border-blue-500 bg-blue-50 opacity-70 w-32 h-10 flex items-center justify-center text-xs text-blue-600 pointer-events-none">
-                Signature {i + 1}
+              <div 
+                key={i} 
+                style={{ position: 'absolute', left: sig.x, top: sig.y, transform: 'translate(-50%, -50%)', zIndex: 50 }}
+                className="border-2 border-dashed border-blue-500 bg-blue-50 font-bold opacity-90 w-36 h-12 flex items-center justify-center text-xs text-blue-700 shadow-md rounded pointer-events-none transition-transform"
+              >
+                🖋️ Signature Field {i + 1}
               </div>
             ))}
           </div>
         ) : (
-          <div className="text-red-500 font-semibold">Could not verify secure file stream access tokens.</div>
+          <div className="text-red-500 font-semibold p-4 bg-red-50 border border-red-200 rounded-xl">
+            Could not verify secure file asset stream access parameters.
+          </div>
         )}
       </div>
 
+      {/* Right Column: Control Sidebar Panel */}
       <div className="w-80 bg-white p-6 rounded-xl shadow-md h-fit border border-gray-100">
-        <h3 className="font-bold text-lg mb-4">Document Actions</h3>
+        <h3 className="font-bold text-lg mb-4 text-gray-800">Document Actions</h3>
         
         <div className="mb-6">
           <span className="text-sm font-semibold text-gray-600 block mb-2">Active Fields Placed:</span>
-          <div className="p-3 bg-gray-50 rounded-lg text-sm text-gray-700 font-medium">
-            {signatures.length} Signature Target Box(es)
+          <div className="p-3 bg-blue-50 text-blue-700 rounded-lg text-sm font-semibold">
+            {signatures.length} Target Box(es) Active
           </div>
         </div>
 
@@ -147,12 +156,12 @@ export default function PDFEditor() {
           <input 
             type="email" 
             placeholder="client@gmail.com"
-            className="w-full border rounded-lg p-2 text-sm mb-4"
+            className="w-full border rounded-lg p-2.5 text-sm mb-4 focus:ring-2 focus:ring-blue-500 focus:outline-none"
             value={signerEmail}
             onChange={(e) => setSignerEmail(e.target.value)}
             required
           />
-          <button type="submit" className="w-full bg-blue-600 text-white py-2 rounded-lg text-sm font-semibold hover:bg-blue-700 transition">
+          <button type="submit" className="w-full bg-blue-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-blue-700 transition shadow-sm">
             Generate Signing Link
           </button>
         </form>
