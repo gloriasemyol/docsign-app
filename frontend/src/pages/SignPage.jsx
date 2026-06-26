@@ -1,70 +1,129 @@
 import React, { useState, useEffect } from 'react';
-import { useParams } from 'react-router-dom';
+import { useParams, Link } from 'react-router-dom';
 import axios from 'axios';
 
 export default function SignPage() {
   const { token } = useParams();
-  const [sig, setSig] = useState(null);
-  const [reason, setReason] = useState('');
-  const [done, setDone] = useState(false);
+  const [sigData, setSigData] = useState(null);
+  const [typedName, setTypedName] = useState('');
   const [loading, setLoading] = useState(true);
+  const [isSigned, setIsSigned] = useState(false);
+  const [downloadPath, setDownloadPath] = useState('');
+
+  const cleanApiUrl = process.env.REACT_APP_API_URL.replace(/\/$/, '');
 
   useEffect(() => {
-    axios.get(`${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api/signatures/token/${token}`)
-      .then(r => {
-        setSig(r.data);
+    const fetchSignatureDetails = async () => {
+      try {
+        const res = await axios.get(`${cleanApiUrl}/api/signatures/token/${token}`);
+        setSigData(res.data);
+      } catch (err) {
+        console.error("Error verifying public signing handshake token parameters:", err);
+      } finally {
         setLoading(false);
-      })
-      .catch((err) => {
-        console.error("Token checking error:", err);
-        setSig(null);
-        setLoading(false);
-      });
-  }, [token]);
+      }
+    };
+    fetchSignatureDetails();
+  }, [token, cleanApiUrl]);
 
-  const handleAction = async (action) => {
+  const handleCommitSignature = async (e) => {
+    e.preventDefault();
+    if (!typedName.trim()) {
+      alert("Please type your name to sign the document!");
+      return;
+    }
+
     try {
-      await axios.patch(`${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api/signatures/${sig._id}/status`,
-        { status: action, reason });
-      setDone(true);
+      // 1. Submit the signature action data block to update status to 'signed'
+      await axios.patch(`${cleanApiUrl}/api/signatures/${sigData._id}/sign`, {
+        typedName: typedName
+      });
+
+      // 2. TRIGGER THE FINALIZER: This instructs the backend to merge the text into the file structure
+      try {
+        const finalizeRes = await axios.post(`${cleanApiUrl}/api/signatures/finalize/${sigData.document}`);
+        if (finalizeRes.data && finalizeRes.data.path) {
+          setDownloadPath(finalizeRes.data.path);
+        }
+      } catch (finalizeErr) {
+        console.warn("PDF generation script hook bypassed or missing path headers:", finalizeErr.message);
+      }
+
+      setIsSigned(true);
     } catch (err) {
-      alert('Action failed submission processing.');
+      alert('Signature transaction processing error: ' + (err.response?.data?.message || err.message));
     }
   };
 
-  if (loading) return <div className="p-8 text-center text-gray-500">Verifying secure signature token...</div>;
-  if (done) return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50">
-      <div className="text-center bg-white p-8 rounded-2xl shadow-sm border border-gray-100 max-w-sm">
-        <p className="text-3xl font-bold text-green-600">✓ Signed</p>
-        <p className="text-gray-500 mt-2 text-sm">Your secure signing transaction has been logged inside our cryptographic audit trail.</p>
-      </div>
-    </div>
-  );
+  const downloadFileDirectly = () => {
+    if (!downloadPath) {
+      alert("No signed binary asset stream could be parsed for this transaction.");
+      return;
+    }
+    let cleanPath = downloadPath.replace(/\\/g, '/');
+    if (cleanPath.startsWith('uploads/')) {
+      cleanPath = cleanPath.replace('uploads/', '');
+    }
+    window.open(`${cleanApiUrl}/uploads/${cleanPath}`, '_blank');
+  };
 
-  if (!sig) return <p className="p-8 text-red-500 font-semibold text-center">Invalid or expired document link.</p>;
+  if (loading) return <div className="p-8 text-gray-500 font-medium">Verifying secure audit link token vectors...</div>;
+  if (!sigData) return <div className="p-8 text-red-500 font-bold">This signing invitation link is invalid or has expired!</div>;
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50 p-4">
-      <div className="bg-white rounded-xl shadow-lg p-8 w-full max-w-md border border-gray-100">
-        <h2 className="text-xl font-bold mb-2 text-gray-800">Review & Sign</h2>
-        <p className="text-gray-500 mb-6 text-sm">You have been requested to verify and append a digital sign-off configuration.</p>
-        
-        <textarea
-          placeholder="Add signature notes or reason (Required if rejecting document)"
-          className="w-full border rounded-lg p-3 mb-4 h-24 text-sm focus:outline-blue-500"
-          value={reason} onChange={e => setReason(e.target.value)}
-        />
-        <div className="flex gap-4">
-          <button onClick={() => handleAction('signed')}
-            className="flex-1 bg-green-600 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-green-700 transition shadow-sm">
-            Sign Document
-          </button>
-          <button onClick={() => handleAction('rejected')}
-            className="flex-1 bg-red-500 text-white py-2.5 rounded-lg text-sm font-semibold hover:bg-red-600 transition shadow-sm">
-            Reject
-          </button>
-        </div>
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-4">
+      <div className="bg-white max-w-md w-full p-8 rounded-2xl shadow-xl border border-gray-100 text-center">
+        {!isSigned ? (
+          <>
+            <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center text-2xl mx-auto mb-4">🖋️</div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Secure Signature Request</h2>
+            <p className="text-gray-500 text-sm mb-6">You have been invited to digitally sign a secure document layer.</p>
+            
+            <div className="p-3 bg-gray-50 text-left rounded-lg text-xs text-gray-600 mb-6 space-y-1">
+              <div><span className="font-semibold text-gray-700">Recipient Email:</span> {sigData.signerEmail}</div>
+              <div><span className="font-semibold text-gray-700">Target Field Point:</span> X: {sigData.x} | Y: {sigData.y}</div>
+            </div>
+
+            <form onSubmit={handleCommitSignature} className="space-y-4">
+              <div className="text-left">
+                <label className="text-xs font-bold text-gray-600 block mb-2">TYPE YOUR FULL NAME TO SIGN</label>
+                <input 
+                  type="text"
+                  placeholder="Gloria Semyol"
+                  value={typedName}
+                  onChange={(e) => setTypedName(e.target.value)}
+                  className="w-full border rounded-xl p-3 font-medium text-gray-800 focus:ring-2 focus:ring-blue-500 focus:outline-none placeholder-gray-400"
+                  required
+                />
+              </div>
+              <button type="submit" className="w-full bg-blue-600 text-white py-3 rounded-xl font-bold hover:bg-blue-700 transition shadow-md">
+                Confirm & Apply Digital Signature
+              </button>
+            </form>
+          </>
+        ) : (
+          <>
+            <div className="w-16 h-16 bg-green-50 text-green-600 rounded-full flex items-center justify-center text-3xl mx-auto mb-4">✓</div>
+            <h2 className="text-2xl font-bold text-gray-800 mb-2">Signed Successfully!</h2>
+            <p className="text-gray-500 text-sm mb-6">Your secure signing transaction has been logged inside our cryptographic audit trail.</p>
+
+            <div className="space-y-3">
+              <button 
+                onClick={downloadFileDirectly}
+                className="w-full bg-green-600 text-white py-3 rounded-xl font-bold hover:bg-green-700 transition shadow-md flex items-center justify-center gap-2"
+              >
+                📥 Download Signed Document
+              </button>
+
+              <Link 
+                to="/dashboard" 
+                className="w-full bg-gray-100 text-gray-700 py-3 rounded-xl font-semibold hover:bg-gray-200 transition block"
+              >
+                Return to Dashboard Workspace
+              </Link>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );
