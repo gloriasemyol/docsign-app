@@ -20,7 +20,6 @@ export default function PDFEditor() {
       const cleanApiUrl = process.env.REACT_APP_API_URL.replace(/\/$/, '');
       
       try {
-        // 1. Get the document metadata from your records
         const res = await axios.get(`${cleanApiUrl}/api/docs`, {
           headers: { Authorization: `Bearer ${token}` }
         });
@@ -28,16 +27,19 @@ export default function PDFEditor() {
         const currentDoc = res.data.find(d => d._id === docId);
         
         if (currentDoc && currentDoc.filePath) {
-          const cleanFilePath = currentDoc.filePath.replace(/\\/g, '/');
-          const fileDownloadUrl = `${cleanApiUrl}/${cleanFilePath}`;
+          // Normalize separators and clean double subfolder structures
+          let cleanPath = currentDoc.filePath.replace(/\\/g, '/');
+          if (cleanPath.startsWith('uploads/')) {
+            cleanPath = cleanPath.replace('uploads/', '');
+          }
+
+          const fileDownloadUrl = `${cleanApiUrl}/uploads/${cleanPath}`;
+          console.log("Requesting raw file path asset from endpoint:", fileDownloadUrl);
           
-          // 2. Fetch the actual PDF file as an authenticated binary blob stream
           const blobRes = await axios.get(fileDownloadUrl, {
-            headers: { Authorization: `Bearer ${token}` },
             responseType: 'blob'
           });
           
-          // 3. Create a local temporary browser object URL from that secure blob data
           const localUrl = URL.createObjectURL(blobRes.data);
           setPdfBlobUrl(localUrl);
         }
@@ -50,7 +52,6 @@ export default function PDFEditor() {
 
     fetchDocDetailsAndBlob();
 
-    // Cleanup local memory references when navigating away from the page
     return () => {
       if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
     };
@@ -94,7 +95,6 @@ export default function PDFEditor() {
       
       const productionSignLink = `${window.location.origin}/sign/${res.data.token}`;
       alert(`Invitation generated!\n\nLink: ${productionSignLink}`);
-      console.log("Generated Link:", productionSignLink);
     } catch (err) {
       alert('Failed to send invitation: ' + (err.response?.data?.message || err.message));
     }
@@ -104,7 +104,6 @@ export default function PDFEditor() {
 
   return (
     <div className="p-8 flex flex-col md:flex-row gap-8">
-      {/* Left Column: The PDF Editor workspace */}
       <div className="flex-1">
         <h2 className="text-xl font-bold mb-2">Place Signature Fields</h2>
         <p className="text-gray-500 mb-4">Click anywhere on the PDF pages below to place a signature field block.</p>
@@ -133,7 +132,6 @@ export default function PDFEditor() {
         )}
       </div>
 
-      {/* Right Column: Control Panel for Sending Invites */}
       <div className="w-80 bg-white p-6 rounded-xl shadow-md h-fit border border-gray-100">
         <h3 className="font-bold text-lg mb-4">Document Actions</h3>
         

@@ -8,23 +8,29 @@ dotenv.config(); // load .env variables
 
 const app = express(); // create our server
 
-// Global CORS Rule Setup for Standard JSON API Requests
+// Complete Global CORS Configuration
 app.use(cors({
   origin: '*',
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization']
 }));
 
-app.use(express.json());       // allow server to read JSON data
+app.use(express.json()); // allow server to read JSON data
 
-// CRITICAL FIX: Custom static middleware header injector for binary PDF streams
+// CATCH-ALL STATIC CONFIGURATION: Injects headers and resolves folder structural mismatches
 app.use('/uploads', (req, res, next) => {
   res.set('Access-Control-Allow-Origin', '*');
   res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
   res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
-  if (req.method === 'OPTIONS') {
-    return res.sendStatus(200);
-  }
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
+  next();
+}, express.static(path.join(__dirname, 'uploads')));
+
+app.use('/api/uploads', (req, res, next) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') return res.sendStatus(200);
   next();
 }, express.static(path.join(__dirname, 'uploads')));
 
@@ -41,19 +47,18 @@ app.use('/api/signatures', sigRoutes);
 const auditRoutes = require('./routes/auditRoutes');
 app.use('/api/audit', auditRoutes);
 
-// Connect to MongoDB database with timeout configuration limits
+// Connect to MongoDB database
 mongoose.connect(process.env.MONGO_URI, {
-    serverSelectionTimeoutMS: 5000 // Prevents blocking execution infinitely if connection drops
+    serverSelectionTimeoutMS: 5000
   })
   .then(() => console.log('Database connected!'))
   .catch(err => console.log('DB Error:', err));
 
-// Test root route - visit to see if backend is responsive
+// Test root route
 app.get('/', (req, res) => {
   res.json({ message: 'DocSign API is running!' });
 });
 
-// Dynamic Port Allocation for Production Servers (Render uses process.env.PORT)
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
