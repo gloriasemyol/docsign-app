@@ -8,30 +8,52 @@ pdfjs.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/$
 
 export default function PDFEditor() {
   const { docId } = useParams();
-  const [filePath, setFilePath] = useState('');
+  const [pdfBlobUrl, setPdfBlobUrl] = useState('');
   const [signatures, setSignatures] = useState([]);
   const [signerEmail, setSignerEmail] = useState('');
   const [loading, setLoading] = useState(true);
   const pdfRef = useRef(null);
 
   useEffect(() => {
-    const fetchDocDetails = async () => {
+    const fetchDocDetailsAndBlob = async () => {
       const token = localStorage.getItem('token');
+      const cleanApiUrl = process.env.REACT_APP_API_URL.replace(/\/$/, '');
+      
       try {
-        const res = await axios.get(`${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api/docs`, {
+        // 1. Get the document metadata from your records
+        const res = await axios.get(`${cleanApiUrl}/api/docs`, {
           headers: { Authorization: `Bearer ${token}` }
         });
+        
         const currentDoc = res.data.find(d => d._id === docId);
-        if (currentDoc) {
-          setFilePath(currentDoc.filePath);
+        
+        if (currentDoc && currentDoc.filePath) {
+          const cleanFilePath = currentDoc.filePath.replace(/\\/g, '/');
+          const fileDownloadUrl = `${cleanApiUrl}/${cleanFilePath}`;
+          
+          // 2. Fetch the actual PDF file as an authenticated binary blob stream
+          const blobRes = await axios.get(fileDownloadUrl, {
+            headers: { Authorization: `Bearer ${token}` },
+            responseType: 'blob'
+          });
+          
+          // 3. Create a local temporary browser object URL from that secure blob data
+          const localUrl = URL.createObjectURL(blobRes.data);
+          setPdfBlobUrl(localUrl);
         }
       } catch (err) {
-        console.error("Error fetching document details:", err);
+        console.error("Error downloading secure document content layers:", err);
       } finally {
         setLoading(false);
       }
     };
-    fetchDocDetails();
+
+    fetchDocDetailsAndBlob();
+
+    // Cleanup local memory references when navigating away from the page
+    return () => {
+      if (pdfBlobUrl) URL.revokeObjectURL(pdfBlobUrl);
+    };
   }, [docId]);
 
   const handlePDFClick = (e) => {
@@ -56,8 +78,10 @@ export default function PDFEditor() {
     }
 
     const token = localStorage.getItem('token');
+    const cleanApiUrl = process.env.REACT_APP_API_URL.replace(/\/$/, '');
+
     try {
-      const res = await axios.post(`${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/api/signatures/invite`,
+      const res = await axios.post(`${cleanApiUrl}/api/signatures/invite`,
         { 
           documentId: docId, 
           signerEmail: signerEmail, 
@@ -76,22 +100,23 @@ export default function PDFEditor() {
     }
   };
 
-  if (loading) return <div className="p-8">Loading document editor...</div>;
+  if (loading) return <div className="p-8">Loading document editor workspace...</div>;
 
   return (
     <div className="p-8 flex flex-col md:flex-row gap-8">
+      {/* Left Column: The PDF Editor workspace */}
       <div className="flex-1">
         <h2 className="text-xl font-bold mb-2">Place Signature Fields</h2>
         <p className="text-gray-500 mb-4">Click anywhere on the PDF pages below to place a signature field block.</p>
 
-        {filePath ? (
+        {pdfBlobUrl ? (
           <div className="relative inline-block border-2 border-gray-200 rounded cursor-crosshair"
             ref={pdfRef} onClick={handlePDFClick}>
 
             <Document 
-              file={`${process.env.REACT_APP_API_URL.replace(/\/$/, '')}/${filePath.replace(/\\/g, '/')}`}
-              onLoadError={(err) => console.error("PDF Load Error:", err)}
-              loading={<div className="p-4 text-blue-600 font-medium">Downloading PDF Asset from Render...</div>}
+              file={pdfBlobUrl}
+              onLoadError={(err) => console.error("PDF Component Load Engine Mismatch:", err)}
+              loading={<div className="p-4 text-blue-600 font-medium">Assembling authenticated data stream layout...</div>}
             >
               <Page pageNumber={1} width={700} renderTextLayer={false} renderAnnotationLayer={false} />
             </Document>
@@ -104,10 +129,11 @@ export default function PDFEditor() {
             ))}
           </div>
         ) : (
-          <div className="text-red-500 font-semibold">Could not find or retrieve PDF binary path file.</div>
+          <div className="text-red-500 font-semibold">Could not verify secure file stream access tokens.</div>
         )}
       </div>
 
+      {/* Right Column: Control Panel for Sending Invites */}
       <div className="w-80 bg-white p-6 rounded-xl shadow-md h-fit border border-gray-100">
         <h3 className="font-bold text-lg mb-4">Document Actions</h3>
         
