@@ -3,15 +3,13 @@ const crypto = require('crypto');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
-const axios = require('axios'); // Needed to fetch the cursive font bytes
-const { PDFDocument, rgb } = require('pdf-lib'); 
-const fontkit = require('@pdf-lib/fontkit'); // Extra helper to register custom fonts
+const { PDFDocument, rgb, StandardFonts } = require('pdf-lib'); // Reverted to core built-in fonts
 const Signature = require('../models/Signature');
 const Document = require('../models/Document');
 const { protect } = require('../middleware/auth');
 const { logAction } = require('../middleware/audit');
 
-// 1. POST /api/signatures/finalize/:docId — Bakes an authentic cursive signature into the PDF
+// 1. POST /api/signatures/finalize/:docId — Bakes an authentic signature into the PDF
 router.post('/finalize/:docId', async (req, res) => {
   try {
     const doc = await Document.findById(req.params.docId);
@@ -29,21 +27,8 @@ router.post('/finalize/:docId', async (req, res) => {
         const existingPdfBytes = fs.readFileSync(originalFilePath);
         const pdfDoc = await PDFDocument.load(existingPdfBytes);
         
-        // Register the fontkit engine to handle external custom fonts
-        pdfDoc.registerFontkit(fontkit);
-
-        let customSignatureFont;
-        try {
-          // Fetch a beautiful, lightweight, real-world cursive signature font from a public CDN
-          const fontUrl = 'https://fonts.gstatic.com/s/parisienne/v12/m8JVjfNMAZ6r0773q3bXv7tDVA.ttf';
-          const fontResponse = await axios.get(fontUrl, { responseType: 'arraybuffer' });
-          const fontBytes = fontResponse.data;
-          
-          // Embed the true cursive font into the PDF document structure
-          customSignatureFont = await pdfDoc.embedFont(fontBytes);
-        } catch (fontErr) {
-          console.warn("Failed to fetch cursive font, falling back to built-in italic:", fontErr.message);
-        }
+        // FIX: Load native Times-Roman Bold Italic font (looks like elegant cursive fountain-pen script)
+        const signatureFont = await pdfDoc.embedFont(StandardFonts.TimesRomanBoldItalic);
 
         const pages = pdfDoc.getPages();
         const firstPage = pages[0];
@@ -58,17 +43,13 @@ router.post('/finalize/:docId', async (req, res) => {
 
           const finalSignatureText = sig.typedSignatureName || 'Gloria';
 
-          // If custom font loaded successfully, use it! Otherwise, fall back to native bold italic
-          const activeFont = customSignatureFont || await pdfDoc.embedFont('Times-BoldItalic');
-          const fontSize = customSignatureFont ? 24 : 14; // Cursive fonts usually need to be larger to look natural
-
-          // Render ONLY your handwritten signature name onto the PDF canvas
+          // Render your signature text beautifully onto the core PDF canvas layer
           firstPage.drawText(finalSignatureText, {
             x: pdfX,
             y: pdfY,
-            size: fontSize,
-            font: activeFont,
-            color: rgb(0.05, 0.15, 0.45), // Classic premium fountain pen "Midnight Blue" ink color!
+            size: 16, // Prominent signature footprint size
+            font: signatureFont,
+            color: rgb(0.05, 0.2, 0.6), // Stunning royal fountain-pen blue signature ink color!
           });
         }
 
