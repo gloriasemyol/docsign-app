@@ -1,30 +1,76 @@
 const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
+const path = require('path');
+const fs = require('fs');
+const { PDFDocument, rgb, StandardFonts } = require('pdf-lib'); // Import native PDF injector
 const Signature = require('../models/Signature');
 const Document = require('../models/Document');
 const { protect } = require('../middleware/auth');
 const { logAction } = require('../middleware/audit');
 
-// 1. POST /api/signatures/finalize/:docId — generate the signed PDF and flip status flags
+// 1. POST /api/signatures/finalize/:docId — Bakes signature text into the physical PDF file
 router.post('/finalize/:docId', async (req, res) => {
   try {
     const doc = await Document.findById(req.params.docId);
     if (!doc) return res.status(404).json({ message: 'Document not found' });
 
-    // Fetch matching signature structures
+    // Fetch the signature entries recorded for this document
     const sigs = await Signature.find({
       document: req.params.docId,
       status: 'signed'
     });
 
-    // Update the parent document status schema parameters directly
+    if (sigs.length > 0) {
+      // Resolve the absolute file path pointers on the disk
+      const originalFilePath = path.join(__dirname, '..', doc.filePath);
+      
+      if (fs.existsSync(originalFilePath)) {
+        // Read raw file binary buffers
+        const existingPdfBytes = fs.readFileSync(originalFilePath);
+        const pdfDoc = await PDFDocument.load(existingPdfBytes);
+        
+        const pages = pdfDoc.getPages();
+        const firstPage = pages[0];
+        const { width, height } = firstPage.getSize();
+        
+        // Load standard script fonts
+        const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        
+        // Loop through and write every confirmed signature field block onto the page canvas
+        for (const sig of sigs) {
+          // Adjust coordinate layout scale mapping rules
+          // Frontend width is fixed to 700px, map dynamically to native PDF points
+          const scaleX = width / 700;
+          const pdfX = sig.x * scaleX;
+          
+          // PDF coordinate space charts (0,0) at bottom-left; invert Y coordinate systems safely
+          const scaleY = height / 950; 
+          const pdfY = height - (sig.y * scaleY);
+
+          // Render signature marker text string cleanly onto the binary document context
+          firstPage.drawText(`Digitally Signed by: Gloria`, {
+            x: pdfX,
+            y: pdfY,
+            size: 12,
+            font: helveticaFont,
+            color: rgb(0, 0.2, 0.8), // Corporate validation blue accent tint
+          });
+        }
+
+        // Overwrite the file on disk with the new signed bytes
+        const modifiedPdfBytes = await pdfDoc.save();
+        fs.writeFileSync(originalFilePath, modifiedPdfBytes);
+      }
+    }
+
+    // Flip parent model tracking parameters to signed status inside MongoDB
     doc.status = 'signed';
     await doc.save();
 
-    // Return current path metadata back to frontend download client
     res.json({ message: 'Signed PDF processed!', path: doc.filePath });
   } catch (err) {
+    console.error("PDF Finalizer Engine Crash Trace:", err);
     res.status(500).json({ message: err.message });
   }
 });
@@ -95,7 +141,6 @@ router.patch('/:id/sign', async (req, res) => {
     sig.signedAt = new Date();
     await sig.save(); 
 
-    // Safe fallbacks for execution traces if request hooks are missing
     try {
       await logAction(sig.document, 'signed', sig.signerEmail, req,
         `Signed at coordinates x:${sig.x} y:${sig.y}`
