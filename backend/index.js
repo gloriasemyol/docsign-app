@@ -2,24 +2,31 @@ const express = require('express');   // import express framework
 const mongoose = require('mongoose'); // import database connector
 const cors = require('cors');         // allow frontend to talk to backend
 const dotenv = require('dotenv');     // read our secret .env file
-const path = require('path');         // Added built-in path module for static folders
+const path = require('path');         // built-in path module for static folders
 
 dotenv.config(); // load .env variables
 
 const app = express(); // create our server
 
-// Middleware configurations
-app.use(cors());               // allow cross-origin requests
+// Global CORS Rule Setup for Standard JSON API Requests
+app.use(cors({
+  origin: '*',
+  methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization']
+}));
+
 app.use(express.json());       // allow server to read JSON data
 
-// FIX: Explicitly inject CORS headers into your static uploads route to prevent browser blocking
-app.use('/uploads', cors(), express.static(path.join(__dirname, 'uploads'), {
-  setHeaders: (res, path) => {
-    res.set('Access-Control-Allow-Origin', '*');
-    res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
-    res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+// CRITICAL FIX: Custom static middleware header injector for binary PDF streams
+app.use('/uploads', (req, res, next) => {
+  res.set('Access-Control-Allow-Origin', '*');
+  res.set('Access-Control-Allow-Methods', 'GET, OPTIONS');
+  res.set('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(200);
   }
-}));
+  next();
+}, express.static(path.join(__dirname, 'uploads')));
 
 // API Routes setup
 const authRoutes = require('./routes/authRoutes');
