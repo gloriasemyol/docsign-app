@@ -3,19 +3,20 @@ const crypto = require('crypto');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
-const { PDFDocument, rgb, StandardFonts } = require('pdf-lib'); 
+const axios = require('axios'); // Needed to fetch the cursive font bytes
+const { PDFDocument, rgb } = require('pdf-lib'); 
+const fontkit = require('@pdf-lib/fontkit'); // Extra helper to register custom fonts
 const Signature = require('../models/Signature');
 const Document = require('../models/Document');
 const { protect } = require('../middleware/auth');
 const { logAction } = require('../middleware/audit');
 
-// 1. POST /api/signatures/finalize/:docId — Bakes the custom typed signature name into the PDF file
+// 1. POST /api/signatures/finalize/:docId — Bakes an authentic cursive signature into the PDF
 router.post('/finalize/:docId', async (req, res) => {
   try {
     const doc = await Document.findById(req.params.docId);
     if (!doc) return res.status(404).json({ message: 'Document not found' });
 
-    // Fetch the signature entries recorded for this document
     const sigs = await Signature.find({
       document: req.params.docId,
       status: 'signed'
@@ -28,12 +29,25 @@ router.post('/finalize/:docId', async (req, res) => {
         const existingPdfBytes = fs.readFileSync(originalFilePath);
         const pdfDoc = await PDFDocument.load(existingPdfBytes);
         
+        // Register the fontkit engine to handle external custom fonts
+        pdfDoc.registerFontkit(fontkit);
+
+        let customSignatureFont;
+        try {
+          // Fetch a beautiful, lightweight, real-world cursive signature font from a public CDN
+          const fontUrl = 'https://fonts.gstatic.com/s/parisienne/v12/m8JVjfNMAZ6r0773q3bXv7tDVA.ttf';
+          const fontResponse = await axios.get(fontUrl, { responseType: 'arraybuffer' });
+          const fontBytes = fontResponse.data;
+          
+          // Embed the true cursive font into the PDF document structure
+          customSignatureFont = await pdfDoc.embedFont(fontBytes);
+        } catch (fontErr) {
+          console.warn("Failed to fetch cursive font, falling back to built-in italic:", fontErr.message);
+        }
+
         const pages = pdfDoc.getPages();
         const firstPage = pages[0];
         const { width, height } = firstPage.getSize();
-        
-        // Load standard handwriting-style lookalike or crisp text fonts
-        const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique);
         
         for (const sig of sigs) {
           const scaleX = width / 700;
@@ -42,16 +56,19 @@ router.post('/finalize/:docId', async (req, res) => {
           const scaleY = height / 950; 
           const pdfY = height - (sig.y * scaleY);
 
-          // FIX: If the user typed a specific custom name (like Gloria), use it! Otherwise fallback.
-          const finalSignatureText = sig.typedSignatureName || sig.signerEmail || 'Gloria';
+          const finalSignatureText = sig.typedSignatureName || 'Gloria';
 
-          // Render ONLY your signature name cleanly onto the binary document layer
+          // If custom font loaded successfully, use it! Otherwise, fall back to native bold italic
+          const activeFont = customSignatureFont || await pdfDoc.embedFont('Times-BoldItalic');
+          const fontSize = customSignatureFont ? 24 : 14; // Cursive fonts usually need to be larger to look natural
+
+          // Render ONLY your handwritten signature name onto the PDF canvas
           firstPage.drawText(finalSignatureText, {
             x: pdfX,
             y: pdfY,
-            size: 14,             // Made slightly larger for visibility
-            font: helveticaFont,   // Changed to Oblique style so it looks like a cursive/italic signature!
-            color: rgb(0, 0, 0),   // Crisp black ink signature line
+            size: fontSize,
+            font: activeFont,
+            color: rgb(0.05, 0.15, 0.45), // Classic premium fountain pen "Midnight Blue" ink color!
           });
         }
 
@@ -66,35 +83,6 @@ router.post('/finalize/:docId', async (req, res) => {
     res.json({ message: 'Signed PDF processed!', path: doc.filePath });
   } catch (err) {
     console.error("PDF Finalizer Engine Crash Trace:", err);
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// 5. PATCH /api/signatures/:id/sign — Capture and save the typed signature string into the database record
-router.patch('/:id/sign', async (req, res) => {
-  try {
-    const sig = await Signature.findById(req.params.id);
-    if (!sig) return res.status(404).json({ message: 'Signature field not found' });
-
-    // FIX: Save the exact name string sent from the front-end signing input box layout
-    if (req.body.typedName) {
-      sig.typedSignatureName = req.body.typedName;
-    }
-
-    sig.status = 'signed';
-    sig.signedAt = new Date();
-    await sig.save(); 
-
-    try {
-      await logAction(sig.document, 'signed', sig.signerEmail, req,
-        `Signed at coordinates x:${sig.x} y:${sig.y}`
-      );
-    } catch (auditErr) {
-      console.warn("Audit trail middleware hook bypassed setup:", auditErr.message);
-    }
-
-    res.json({ message: 'Document signed successfully!', sig });
-  } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
@@ -163,6 +151,33 @@ router.get('/token/:token', async (req, res) => {
     });
     if (!sig) return res.status(404).json({ message: 'Link expired or invalid' });
     res.json(sig);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+router.patch('/:id/sign', async (req, res) => {
+  try {
+    const sig = await Signature.findById(req.params.id);
+    if (!sig) return res.status(404).json({ message: 'Signature field not found' });
+
+    if (req.body.typedName) {
+      sig.typedSignatureName = req.body.typedName;
+    }
+
+    sig.status = 'signed';
+    sig.signedAt = new Date();
+    await sig.save(); 
+
+    try {
+      await logAction(sig.document, 'signed', sig.signerEmail, req,
+        `Signed at coordinates x:${sig.x} y:${sig.y}`
+      );
+    } catch (auditErr) {
+      console.warn("Audit trail middleware hook bypassed setup:", auditErr.message);
+    }
+
+    res.json({ message: 'Document signed successfully!', sig });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
