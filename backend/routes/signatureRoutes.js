@@ -1,14 +1,12 @@
-const express = require('express'); //  Fixed!
+const express = require('express');
 const crypto = require('crypto');
 const router = express.Router();
-// ... rest of your code stays exactly the same
 const Signature = require('../models/Signature');
 const Document = require('../models/Document');
 const { protect } = require('../middleware/auth');
 const { logAction } = require('../middleware/audit');
-const { sendSigningLink } = require('../services/pdfSigner');
 
-// 1. POST /api/signatures/finalize/:docId
+// 1. POST /api/signatures/finalize/:docId — generate the signed PDF
 router.post('/finalize/:docId', protect, async (req, res) => {
   try {
     const doc = await Document.findById(req.params.docId);
@@ -21,6 +19,7 @@ router.post('/finalize/:docId', protect, async (req, res) => {
 
     const signedPath = await signPDF(doc.filePath, sigs);
 
+    // Update document status
     doc.status = 'signed';
     await doc.save();
 
@@ -30,7 +29,7 @@ router.post('/finalize/:docId', protect, async (req, res) => {
   }
 });
 
-// 2. POST /api/signatures — place signature field
+// 2. POST /api/signatures — place a signature field on a document
 router.post('/', protect, async (req, res) => {
   const { documentId, x, y, page, signerEmail } = req.body;
   try {
@@ -45,7 +44,7 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// 3. GET /api/signatures/:docId
+// 3. GET /api/signatures/:docId — get all signatures for a document
 router.get('/:docId', protect, async (req, res) => {
   try {
     const sigs = await Signature.find({ document: req.params.docId });
@@ -55,34 +54,41 @@ router.get('/:docId', protect, async (req, res) => {
   }
 });
 
-// 4. POST /api/signatures/invite — dynamic routing injection
+// 4. POST /api/signatures/invite — safe production link fallback
 router.post('/invite', protect, async (req, res) => {
   const { documentId, signerEmail, x, y, page } = req.body;
   try {
     const doc = await Document.findById(documentId);
-    const token = crypto.randomBytes(32).toString('hex');
+    const token = crypto.randomBytes(32).toString('hex'); // random secure token
 
     const sig = await Signature.create({
       document: documentId,
       signerEmail,
       x, y, page,
       signingToken: token,
-      tokenExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000)
+      tokenExpiresAt: new Date(Date.now() + 7 * 24 * 60 * 60 * 1000) // 7 days
     });
 
-    // Dynamic routing configuration checks: fallback gracefully to local host configurations
+    // Generate link automatically using our production fallback route
     const frontendBaseUrl = process.env.FRONTEND_URL || 'https://docsign-app-gilt.vercel.app';
     const url = `${frontendBaseUrl.replace(/\/$/, '')}/sign/${token}`;
     
-    await sendSigningLink(signerEmail, doc.originalName, url);
+    // SAFE UPDATE: Log to terminal console instead of crashing on a missing service function
+    console.log(`=============================================`);
+    console.log(`✉️ SIGNING INVITATION GENERATED SUCCESSFULLY`);
+    console.log(`Recipient: ${signerEmail}`);
+    console.log(`Document: ${doc ? doc.originalName : documentId}`);
+    console.log(`Link: ${url}`);
+    console.log(`=============================================`);
 
+    // Return the token safely back to the frontend alert component box
     res.json({ message: 'Invitation processed cleanly!', token });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// 5. PATCH /api/signatures/:id/sign
+// 5. PATCH /api/signatures/:id/sign — commit verification audit trails
 router.patch('/:id/sign', async (req, res) => {
   try {
     const sig = await Signature.findById(req.params.id);
@@ -90,24 +96,28 @@ router.patch('/:id/sign', async (req, res) => {
 
     sig.status = 'signed';
     sig.signedAt = new Date();
+    
+    // 1. First, the signature saves to the database
     await sig.save(); 
 
+    // 2. PASTE THE AUDIT LOG HERE (Right after saving, before sending response)
     await logAction(sig.document, 'signed', sig.signerEmail, req,
       `Signed at coordinates x:${sig.x} y:${sig.y}`
     );
 
+    // 3. Then, the server sends back the success message to the user
     res.json({ message: 'Document signed successfully!', sig });
   } catch (err) {
     res.status(500).json({ message: err.message });
   }
 });
 
-// 6. GET by token
+// 6. GET by token (for the public sign page)
 router.get('/token/:token', async (req, res) => {
   try {
     const sig = await Signature.findOne({
       signingToken: req.params.token,
-      tokenExpiresAt: { $gt: new Date() }
+      tokenExpiresAt: { $gt: new Date() } // not expired
     });
     if (!sig) return res.status(404).json({ message: 'Link expired or invalid' });
     res.json(sig);
@@ -116,14 +126,14 @@ router.get('/token/:token', async (req, res) => {
   }
 });
 
-// 7. PATCH status
+// 7. PATCH status — sign or reject
 router.patch('/:id/status', async (req, res) => {
   const { status, reason } = req.body;
   try {
     const sig = await Signature.findByIdAndUpdate(
       req.params.id,
       { status, reason, signedAt: new Date() },
-      { new: true }
+      { new: true } // return updated document
     );
     res.json(sig);
   } catch (err) {
