@@ -1,6 +1,7 @@
-const express = require('require');
+const express = require('express'); //  Fixed!
 const crypto = require('crypto');
 const router = express.Router();
+// ... rest of your code stays exactly the same
 const Signature = require('../models/Signature');
 const Document = require('../models/Document');
 const { protect } = require('../middleware/auth');
