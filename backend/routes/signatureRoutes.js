@@ -3,13 +3,13 @@ const crypto = require('crypto');
 const router = express.Router();
 const path = require('path');
 const fs = require('fs');
-const { PDFDocument, rgb, StandardFonts } = require('pdf-lib'); // Import native PDF injector
+const { PDFDocument, rgb, StandardFonts } = require('pdf-lib'); 
 const Signature = require('../models/Signature');
 const Document = require('../models/Document');
 const { protect } = require('../middleware/auth');
 const { logAction } = require('../middleware/audit');
 
-// 1. POST /api/signatures/finalize/:docId — Bakes signature text into the physical PDF file
+// 1. POST /api/signatures/finalize/:docId — Bakes the custom typed signature name into the PDF file
 router.post('/finalize/:docId', async (req, res) => {
   try {
     const doc = await Document.findById(req.params.docId);
@@ -22,11 +22,9 @@ router.post('/finalize/:docId', async (req, res) => {
     });
 
     if (sigs.length > 0) {
-      // Resolve the absolute file path pointers on the disk
       const originalFilePath = path.join(__dirname, '..', doc.filePath);
       
       if (fs.existsSync(originalFilePath)) {
-        // Read raw file binary buffers
         const existingPdfBytes = fs.readFileSync(originalFilePath);
         const pdfDoc = await PDFDocument.load(existingPdfBytes);
         
@@ -34,37 +32,34 @@ router.post('/finalize/:docId', async (req, res) => {
         const firstPage = pages[0];
         const { width, height } = firstPage.getSize();
         
-        // Load standard script fonts
-        const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
+        // Load standard handwriting-style lookalike or crisp text fonts
+        const helveticaFont = await pdfDoc.embedFont(StandardFonts.HelveticaBoldOblique);
         
-        // Loop through and write every confirmed signature field block onto the page canvas
         for (const sig of sigs) {
-          // Adjust coordinate layout scale mapping rules
-          // Frontend width is fixed to 700px, map dynamically to native PDF points
           const scaleX = width / 700;
           const pdfX = sig.x * scaleX;
           
-          // PDF coordinate space charts (0,0) at bottom-left; invert Y coordinate systems safely
           const scaleY = height / 950; 
           const pdfY = height - (sig.y * scaleY);
 
-          // Render signature marker text string cleanly onto the binary document context
-          firstPage.drawText(`Digitally Signed by: Gloria`, {
+          // FIX: If the user typed a specific custom name (like Gloria), use it! Otherwise fallback.
+          const finalSignatureText = sig.typedSignatureName || sig.signerEmail || 'Gloria';
+
+          // Render ONLY your signature name cleanly onto the binary document layer
+          firstPage.drawText(finalSignatureText, {
             x: pdfX,
             y: pdfY,
-            size: 12,
-            font: helveticaFont,
-            color: rgb(0, 0.2, 0.8), // Corporate validation blue accent tint
+            size: 14,             // Made slightly larger for visibility
+            font: helveticaFont,   // Changed to Oblique style so it looks like a cursive/italic signature!
+            color: rgb(0, 0, 0),   // Crisp black ink signature line
           });
         }
 
-        // Overwrite the file on disk with the new signed bytes
         const modifiedPdfBytes = await pdfDoc.save();
         fs.writeFileSync(originalFilePath, modifiedPdfBytes);
       }
     }
 
-    // Flip parent model tracking parameters to signed status inside MongoDB
     doc.status = 'signed';
     await doc.save();
 
@@ -75,7 +70,39 @@ router.post('/finalize/:docId', async (req, res) => {
   }
 });
 
-// 2. POST /api/signatures — place a signature field on a document
+// 5. PATCH /api/signatures/:id/sign — Capture and save the typed signature string into the database record
+router.patch('/:id/sign', async (req, res) => {
+  try {
+    const sig = await Signature.findById(req.params.id);
+    if (!sig) return res.status(404).json({ message: 'Signature field not found' });
+
+    // FIX: Save the exact name string sent from the front-end signing input box layout
+    if (req.body.typedName) {
+      sig.typedSignatureName = req.body.typedName;
+    }
+
+    sig.status = 'signed';
+    sig.signedAt = new Date();
+    await sig.save(); 
+
+    try {
+      await logAction(sig.document, 'signed', sig.signerEmail, req,
+        `Signed at coordinates x:${sig.x} y:${sig.y}`
+      );
+    } catch (auditErr) {
+      console.warn("Audit trail middleware hook bypassed setup:", auditErr.message);
+    }
+
+    res.json({ message: 'Document signed successfully!', sig });
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  }
+});
+
+// ==========================================
+// LEAVE UNCHANGED: HELPER ROUTE STRUCTURES BELOW
+// ==========================================
+
 router.post('/', protect, async (req, res) => {
   const { documentId, x, y, page, signerEmail } = req.body;
   try {
@@ -90,7 +117,6 @@ router.post('/', protect, async (req, res) => {
   }
 });
 
-// 3. GET /api/signatures/:docId — get all signatures for a document
 router.get('/:docId', protect, async (req, res) => {
   try {
     const sigs = await Signature.find({ document: req.params.docId });
@@ -100,7 +126,6 @@ router.get('/:docId', protect, async (req, res) => {
   }
 });
 
-// 4. POST /api/signatures/invite — safe production link fallback
 router.post('/invite', protect, async (req, res) => {
   const { documentId, signerEmail, x, y, page } = req.body;
   try {
@@ -121,7 +146,6 @@ router.post('/invite', protect, async (req, res) => {
     console.log(`=============================================`);
     console.log(`✉️ SIGNING INVITATION GENERATED SUCCESSFULLY`);
     console.log(`Recipient: ${signerEmail}`);
-    console.log(`Document: ${doc ? doc.originalName : documentId}`);
     console.log(`Link: ${url}`);
     console.log(`=============================================`);
 
@@ -131,31 +155,6 @@ router.post('/invite', protect, async (req, res) => {
   }
 });
 
-// 5. PATCH /api/signatures/:id/sign — commit verification audit trails
-router.patch('/:id/sign', async (req, res) => {
-  try {
-    const sig = await Signature.findById(req.params.id);
-    if (!sig) return res.status(404).json({ message: 'Signature field not found' });
-
-    sig.status = 'signed';
-    sig.signedAt = new Date();
-    await sig.save(); 
-
-    try {
-      await logAction(sig.document, 'signed', sig.signerEmail, req,
-        `Signed at coordinates x:${sig.x} y:${sig.y}`
-      );
-    } catch (auditErr) {
-      console.warn("Audit trail middleware hook bypassed setup:", auditErr.message);
-    }
-
-    res.json({ message: 'Document signed successfully!', sig });
-  } catch (err) {
-    res.status(500).json({ message: err.message });
-  }
-});
-
-// 6. GET by token (for the public sign page)
 router.get('/token/:token', async (req, res) => {
   try {
     const sig = await Signature.findOne({
@@ -169,7 +168,6 @@ router.get('/token/:token', async (req, res) => {
   }
 });
 
-// 7. PATCH status — sign or reject
 router.patch('/:id/status', async (req, res) => {
   const { status, reason } = req.body;
   try {
